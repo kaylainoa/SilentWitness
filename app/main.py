@@ -1,5 +1,7 @@
 import os
+import json
 import time  # Added this import so your code can use time.time() without crashing!
+import urllib.request
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
@@ -9,6 +11,47 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
+
+# --- Expo Push alert config (Task 4) -------------------------------------
+# We use Expo Push Notifications instead of SMS: free, unlimited, and native to
+# an Expo app. The mobile app registers a push token (see /api/push-token
+# below); when an incident comes in we POST to Expo's push service to alert
+# every registered device.
+EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send"
+
+# In-memory list of Expo push tokens registered by devices.
+push_tokens = []
+
+
+def send_push_alerts(latitude: str, longitude: str):
+    """Send an Expo push notification to every registered device."""
+    if not push_tokens:
+        print("[Push] No push tokens registered — skipping alerts.")
+        return
+
+    maps_link = f"https://maps.google.com/?q={latitude},{longitude}"
+    for token in push_tokens:
+        message = {
+            "to": token,
+            "title": "SilentWitness alert",
+            "body": f"A possible emergency was detected. Location: {maps_link}",
+            "sound": "default",
+            "data": {"latitude": latitude, "longitude": longitude},
+        }
+        try:
+            req = urllib.request.Request(
+                EXPO_PUSH_ENDPOINT,
+                data=json.dumps(message).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                print(f"[Push] Sent to {token[:20]}...: {resp.status}")
+        except Exception as e:
+            print(f"[Push] Failed to send to {token[:20]}...: {e}")
 
 # Define the name of the header the frontend must send (e.g., X-API-KEY)
 API_KEY_NAME = "X-API-KEY"
@@ -56,6 +99,19 @@ async def get_emergency_contacts():
     return {"contacts": emergency_contacts}
 
 
+# Endpoint for the app to register its Expo push token (Task 4)
+
+class PushToken(BaseModel):
+    token: str
+
+@app.post("/api/push-token")
+async def register_push_token(payload: PushToken):
+    """The app calls this on startup to register for emergency push alerts."""
+    if payload.token not in push_tokens:
+        push_tokens.append(payload.token)
+    return {"status": "success", "registered": len(push_tokens)}
+
+
 #  Endpoint to receive + store audio/GPS
 
 @app.post("/api/incident", dependencies=[Depends(verify_api_key)])
@@ -88,7 +144,10 @@ async def receive_incident(
         
         # Append to our main log collection
         incident_database.append(incident_log)
-        
+
+        # Task 4: fire push alerts to all registered devices.
+        send_push_alerts(latitude, longitude)
+
         return {
             "status": "success",
             "message": "Incident audio and GPS coordinates logged successfully on the server.",
