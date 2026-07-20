@@ -5,6 +5,7 @@ import { useState } from 'react';
 import 'react-native-reanimated';
 
 import { OnboardingContext } from '@/contexts/onboarding-context';
+import { ProfileProvider } from '@/contexts/profile-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export const unstable_settings = {
@@ -17,17 +18,20 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <OnboardingContext.Provider value={{ completeOnboarding: () => setHasOnboarded(true) }}>
-        <Stack>
-          <Stack.Protected guard={!hasOnboarded}>
-            <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-          </Stack.Protected>
-          <Stack.Protected guard={hasOnboarded}>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          </Stack.Protected>
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-        </Stack>
-      </OnboardingContext.Provider>
+      <ProfileProvider>
+        <OnboardingContext.Provider value={{ completeOnboarding: () => setHasOnboarded(true) }}>
+          <Stack>
+            <Stack.Protected guard={!hasOnboarded}>
+              <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+            </Stack.Protected>
+            <Stack.Protected guard={hasOnboarded}>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            </Stack.Protected>
+            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+            <Stack.Screen name="profile" options={{ presentation: 'modal', headerShown: false }} />
+          </Stack>
+        </OnboardingContext.Provider>
+      </ProfileProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

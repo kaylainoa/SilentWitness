@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,6 +37,7 @@ export default function CalculatorScreen() {
   const [storedValue, setStoredValue] = useState<number | null>(null);
   const [pendingOperation, setPendingOperation] = useState<Operation | null>(null);
   const [overwrite, setOverwrite] = useState(true);
+  const [memory, setMemory] = useState(0);
 
   const inputDigit = (digit: string) => {
     if (overwrite) {
@@ -91,7 +93,27 @@ export default function CalculatorScreen() {
     setOverwrite(true);
   };
 
+  const memoryClear = () => {
+    setMemory(0);
+  };
+
+  const memoryRecall = () => {
+    setDisplay(String(memory));
+    setOverwrite(true);
+  };
+
+  const memorySubtract = () => {
+    setMemory(memory - Number(display));
+    setOverwrite(true);
+  };
+
+  const memoryAdd = () => {
+    setMemory(memory + Number(display));
+    setOverwrite(true);
+  };
+
   const isClearAll = display === '0' && storedValue === null && pendingOperation === null;
+  const hasMemory = memory !== 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -102,6 +124,18 @@ export default function CalculatorScreen() {
       </View>
 
       <View style={styles.keypad}>
+        <View style={styles.memoryRow}>
+          <MemoryButton label="mc" disabled={!hasMemory} onPress={memoryClear} />
+          <MemoryButton
+            label="mr"
+            disabled={!hasMemory}
+            onPress={memoryRecall}
+            onLongPress={() => router.push('/profile')}
+          />
+          <MemoryButton label="m−" onPress={memorySubtract} />
+          <MemoryButton label="m+" onPress={memoryAdd} />
+        </View>
+
         <View style={styles.row}>
           <CalcButton
             label={isClearAll ? 'AC' : 'C'}
@@ -200,6 +234,30 @@ function CalcButton({
   );
 }
 
+function MemoryButton({
+  label,
+  onPress,
+  onLongPress,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      style={styles.memoryButton}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={onLongPress}
+      hitSlop={8}>
+      <Text style={[styles.memoryButtonText, disabled && styles.memoryButtonTextDisabled]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -224,6 +282,23 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: 12,
+  },
+  memoryRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  memoryButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  memoryButtonText: {
+    color: '#a5a5a5',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  memoryButtonTextDisabled: {
+    opacity: 0.4,
   },
   button: {
     flex: 1,
