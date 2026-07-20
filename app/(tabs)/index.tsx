@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { usePushRegistration } from '@/hooks/use-push-registration';
+import { useSpikeDetection } from '@/hooks/use-spike-detection';
+
 type Operation = '+' | '-' | '×' | '÷';
 
 const MAX_DIGITS = 9;
@@ -32,6 +35,13 @@ function compute(left: number, right: number, operation: Operation): number {
 }
 
 export default function CalculatorScreen() {
+  // Silent background emergency monitor. Runs behind the calculator disguise;
+  // has no visible effect on the UI. (Tasks 1, 2, 3, 5.)
+  useSpikeDetection();
+
+  // Register this device for emergency push alerts (Task 4).
+  usePushRegistration();
+
   const [display, setDisplay] = useState('0');
   const [storedValue, setStoredValue] = useState<number | null>(null);
   const [pendingOperation, setPendingOperation] = useState<Operation | null>(null);
