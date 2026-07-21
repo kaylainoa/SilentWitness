@@ -3,4 +3,7 @@ uvicorn
 python-multipart
 pydantic
 python-dotenv
+<<<<<<< HEAD
 requests
+=======
+>>>>>>> 284fa878710a560f30f836f7fe780e552da459f2
