@@ -1,4 +1,6 @@
-import { createContext, ReactNode, useContext, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+
+import { API_KEY, CONTACTS_ENDPOINT } from '@/constants/backend';
 
 export type EmergencyContact = {
   id: string;
@@ -9,6 +11,10 @@ export type EmergencyContact = {
 function createContactId() {
   return `contact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+// How long to wait after the last edit before syncing contacts to the
+// backend, so typing a name/phone number doesn't fire a request per keystroke.
+const CONTACTS_SYNC_DEBOUNCE_MS = 1000;
 
 type ProfileContextValue = {
   name: string;
@@ -43,6 +49,24 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const removeContact = (id: string) => {
     setContacts((current) => current.filter((contact) => contact.id !== id));
   };
+
+  // Push the full contact list to the backend whenever it settles, so the
+  // server has someone to alert (push/SMS) when an incident is logged.
+  useEffect(() => {
+    const complete = contacts.filter((c) => c.name.trim() && c.phone.trim());
+
+    const timeout = setTimeout(() => {
+      fetch(CONTACTS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-KEY': API_KEY },
+        body: JSON.stringify({
+          contacts: complete.map((c) => ({ name: c.name, phone_number: c.phone })),
+        }),
+      }).catch((err) => console.warn('[SilentWitness] Failed to sync contacts:', err));
+    }, CONTACTS_SYNC_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [contacts]);
 
   return (
     <ProfileContext.Provider

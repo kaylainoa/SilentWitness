@@ -23,6 +23,11 @@ import { API_KEY, INCIDENT_ENDPOINT } from '@/constants/backend';
 // ---------------------------------------------------------------------------
 const SPIKE_THRESHOLD_DB = -15;
 
+// Disabled for now so recording only happens via the deliberate PIN + "="
+// trigger, not ambient loud sound — makes testing less confusing. Flip to
+// true to re-enable automatic loud-sound detection.
+const AUTO_SPIKE_DETECTION_ENABLED = false;
+
 // How long to capture after a spike is detected, in milliseconds (task 2).
 const CAPTURE_DURATION_MS = 15_000;
 
@@ -46,6 +51,10 @@ export function useSpikeDetection() {
   // True while we're inside a 15s capture, so repeated loud frames don't stack.
   const capturingRef = useRef(false);
   const mountedRef = useRef(true);
+
+  // Lets stopCaptureEarly interrupt the CAPTURE_DURATION_MS wait below.
+  const captureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureResolveRef = useRef<(() => void) | null>(null);
 
   // Start monitoring: permissions -> audio mode -> begin recording.
   const startMonitoring = useCallback(async () => {
@@ -101,32 +110,52 @@ export function useSpikeDetection() {
     }
   }, []);
 
-  // Handle a detected spike: capture 15s, then upload, then resume monitoring.
-  const handleSpike = useCallback(async () => {
+  // Handle a detected spike or manual trigger: capture 15s, then upload, then
+  // resume monitoring.
+  const handleSpike = useCallback(async (source: 'auto' | 'manual' = 'auto') => {
     if (capturingRef.current) return;
     capturingRef.current = true;
-    console.log('[SilentWitness] Spike detected — capturing 15s.');
+    console.log(
+      source === 'manual'
+        ? '[SilentWitness] PIN entered — starting manual capture (15s).'
+        : '[SilentWitness] Spike detected — capturing 15s.'
+    );
 
-    // The recorder is already running (for metering), so it has been capturing
-    // audio around the spike. Let it run CAPTURE_DURATION_MS more, then stop.
-    await new Promise((resolve) => setTimeout(resolve, CAPTURE_DURATION_MS));
-    if (!mountedRef.current) return;
+    try {
+      // The recorder is already running (for metering), so it has been capturing
+      // audio around the spike. Let it run CAPTURE_DURATION_MS more, then stop —
+      // unless stopCaptureEarly() resolves this first.
+      await new Promise<void>((resolve) => {
+        captureResolveRef.current = resolve;
+        captureTimeoutRef.current = setTimeout(resolve, CAPTURE_DURATION_MS);
+      });
+      captureResolveRef.current = null;
+      captureTimeoutRef.current = null;
+      if (!mountedRef.current) return;
 
-    await recorder.stop();
-    const audioUri = recorder.uri;
+      await recorder.stop();
+      const audioUri = recorder.uri;
 
-    if (audioUri) {
-      await uploadIncident(audioUri);
-    } else {
-      console.warn('[SilentWitness] No audio URI after stop.');
+      if (audioUri) {
+        await uploadIncident(audioUri);
+      } else {
+        console.warn('[SilentWitness] No audio URI after stop.');
+      }
+
+      // Resume monitoring for the next spike.
+      if (mountedRef.current) {
+        await recorder.prepareToRecordAsync();
+        recorder.record();
+      }
+    } catch (err) {
+      // Without this, a thrown error here (e.g. recorder.stop() failing)
+      // would leave capturingRef stuck `true` forever, silently disabling
+      // all future spike detection AND manual PIN-triggered captures for
+      // the rest of the session, with no visible error.
+      console.error('[SilentWitness] Capture failed:', err);
+    } finally {
+      capturingRef.current = false;
     }
-
-    // Resume monitoring for the next spike.
-    if (mountedRef.current) {
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-    }
-    capturingRef.current = false;
   }, [recorder, uploadIncident]);
 
   // Start monitoring on mount; stop on unmount.
@@ -142,6 +171,8 @@ export function useSpikeDetection() {
 
   // Task 1: watch the metering level and fire on a spike.
   useEffect(() => {
+    if (!AUTO_SPIKE_DETECTION_ENABLED) return;
+
     const level = recorderState.metering;
     if (level == null) return;
 
@@ -149,7 +180,45 @@ export function useSpikeDetection() {
     // if (__DEV__) console.log('[SilentWitness] level', level.toFixed(1));
 
     if (level > SPIKE_THRESHOLD_DB && !capturingRef.current) {
-      handleSpike();
+      handleSpike('auto');
     }
   }, [recorderState.metering, handleSpike]);
+
+  // Interrupts an in-progress capture (e.g. the listening screen's 4-tap exit)
+  // so it stops and uploads immediately instead of waiting out the full 15s.
+  const stopCaptureEarly = useCallback(() => {
+    if (captureTimeoutRef.current) {
+      clearTimeout(captureTimeoutRef.current);
+      captureTimeoutRef.current = null;
+    }
+    if (captureResolveRef.current) {
+      const resolve = captureResolveRef.current;
+      captureResolveRef.current = null;
+      resolve();
+    }
+  }, []);
+
+  // The `allowsRecording` audio mode this monitor needs puts iOS in the
+  // .playAndRecord session category, which defaults audio OUTPUT to the quiet
+  // earpiece receiver, not the speaker — so incident playback elsewhere in the
+  // app would be nearly inaudible while this is active. Call this before
+  // playing back audio, then resumeMonitoring() when done.
+  const pauseMonitoring = useCallback(async () => {
+    await recorder.stop().catch(() => {});
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    console.log('[SilentWitness] Monitoring paused — audio session switched to playback mode.');
+  }, [recorder]);
+
+  const resumeMonitoring = useCallback(async () => {
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+    console.log('[SilentWitness] Monitoring resumed.');
+  }, [recorder]);
+
+  // Lets other UI (e.g. the secret PIN entry) force the same 15s
+  // capture-and-upload flow used for automatic spike detection.
+  const triggerManualCapture = useCallback(() => handleSpike('manual'), [handleSpike]);
+
+  return { triggerManualCapture, stopCaptureEarly, pauseMonitoring, resumeMonitoring };
 }

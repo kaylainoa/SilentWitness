@@ -35,6 +35,15 @@ yarn-error.*
 .env*.local
 app/.env
 
+# Python backend
+# IMPORTANT: keep this venv OUTSIDE app/ — that directory is scanned by Expo
+# Router for routes, and a venv's vendored .js files (e.g. urllib3's Pyodide
+# worker script) get picked up and crash the app if placed inside it.
+/.venv/
+app/__pycache__/
+app/*.db
+app/saved_recordings/
+
 # typescript
 *.tsbuildinfo
 
