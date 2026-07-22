@@ -7,9 +7,14 @@ from fastapi.testclient import TestClient
 TEST_API_KEY = "test-secret-key"
 os.environ["FASTAPI_API_KEY"] = TEST_API_KEY
 
-import db
-import main
-from main import app
+# Fix imports when test file is inside the app/ directory
+try:
+    import db
+    import main
+    from main import app
+except ImportError:
+    from app import db, main
+    from app.main import app
 
 client = TestClient(app)
 
