@@ -145,3 +145,20 @@ def test_get_incident_audio_flexible_auth(tmp_path):
     assert response.status_code == 200
     assert response.content == b"test audio content"
     assert response.headers["content-type"] == "audio/mp4"
+
+
+def test_get_incident_audio_not_found(client, auth_headers):
+    """Test 9: Requesting audio for a non-existent incident returns 404."""
+    response = client.get("/api/incident/999999/audio", headers=auth_headers)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Incident audio not found"
+
+
+def test_upload_incident_missing_file(client, auth_headers):
+    """Test 10: Uploading an incident without an audio file returns 422 Unprocessable Entity."""
+    payload = {
+        "latitude": 37.7749,
+        "longitude": -122.4194,
+    }
+    response = client.post("/api/incident", data=payload, headers=auth_headers)
+    assert response.status_code == 422
