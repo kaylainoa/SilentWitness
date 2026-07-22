@@ -46,39 +46,42 @@ def transcribe_audio(file_path: str) -> str:
         return ""
 
 
-def generate_tag(transcript: str) -> str:
-    """Ask Claude for a short category tag + one-line description of the clip.
+# Keyword categories for the local (free, offline, no-API) tagger. Each entry is
+# (category label, list of trigger words/phrases). Order matters — the first
+# category with a match wins, so the most urgent categories come first.
+_TAG_CATEGORIES = [
+    ("🚨 Distress", [
+        "help", "help me", "somebody help", "someone help", "call the police",
+        "call 911", "emergency", "save me", "please stop", "i can't breathe",
+    ]),
+    ("⚠️ Threat / conflict", [
+        "leave me alone", "get away", "stop it", "don't touch", "back off",
+        "let me go", "get off", "no means no", "i'll call", "you're hurting me",
+    ]),
+    ("😨 Fear / alarm", [
+        "scared", "afraid", "please", "no no no", "somebody", "anybody",
+    ]),
+]
 
-    Requires ANTHROPIC_API_KEY in the backend .env. Returns "" if unavailable
-    so the incident still works without AI tagging.
+
+def generate_tag(transcript: str) -> str:
+    """Classify the transcript into a category using local keyword matching.
+
+    Free, offline, no API key. Scans the transcript for distress/threat words
+    and returns a short tag + the matched words. Returns a neutral tag when no
+    keywords match, and "" for an empty transcript.
     """
     if not transcript:
         return ""
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("[Tag] ANTHROPIC_API_KEY not set — skipping AI tag.")
-        return ""
 
-    try:
-        import anthropic
+    text = transcript.lower()
+    for label, keywords in _TAG_CATEGORIES:
+        matched = [kw for kw in keywords if kw in text]
+        if matched:
+            # Show up to 3 matched phrases so the tag is informative.
+            return f"{label} — matched: {', '.join(matched[:3])}"
 
-        client = anthropic.Anthropic()
-        prompt = (
-            "This is a transcript of a 15-second audio clip captured by a personal "
-            "safety app when a loud noise or distress was detected. In ONE short line, "
-            "give a category tag followed by a brief description, like "
-            "\"Argument — raised voices, 'get away from me'\" or "
-            "\"Ambient noise — no clear speech\". Transcript:\n\n"
-            f"{transcript}"
-        )
-        response = client.messages.create(
-            model="claude-opus-4-8",
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return next((b.text for b in response.content if b.type == "text"), "").strip()
-    except Exception as e:
-        print(f"[Tag] Claude request failed: {e}")
-        return ""
+    return "🔈 No distress keywords detected"
 
 
 def process_incident_audio(incident_id: int, file_path: str):
