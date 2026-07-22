@@ -21,15 +21,16 @@ def init_db():
                 longitude TEXT NOT NULL,
                 audio_file_path TEXT NOT NULL,
                 transcript TEXT,
-                tag TEXT
+                tag TEXT,
+                has_spike INTEGER NOT NULL DEFAULT 0
             )
             """
         )
-        # Add transcript/tag columns to any pre-existing DB (migration for
-        # databases created before these columns existed).
-        for column in ("transcript", "tag"):
+        # Add transcript/tag/has_spike columns to any pre-existing DB
+        # (migration for databases created before these columns existed).
+        for column, col_type in (("transcript", "TEXT"), ("tag", "TEXT"), ("has_spike", "INTEGER NOT NULL DEFAULT 0")):
             try:
-                conn.execute(f"ALTER TABLE incidents ADD COLUMN {column} TEXT")
+                conn.execute(f"ALTER TABLE incidents ADD COLUMN {column} {col_type}")
             except sqlite3.OperationalError:
                 pass  # column already exists
         conn.execute(
@@ -51,11 +52,13 @@ def init_db():
         conn.commit()
 
 
-def insert_incident(timestamp: int, latitude: str, longitude: str, audio_file_path: str) -> int:
+def insert_incident(
+    timestamp: int, latitude: str, longitude: str, audio_file_path: str, has_spike: bool = False
+) -> int:
     with get_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO incidents (timestamp, latitude, longitude, audio_file_path) VALUES (?, ?, ?, ?)",
-            (timestamp, latitude, longitude, audio_file_path),
+            "INSERT INTO incidents (timestamp, latitude, longitude, audio_file_path, has_spike) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, latitude, longitude, audio_file_path, int(has_spike)),
         )
         conn.commit()
         return cursor.lastrowid

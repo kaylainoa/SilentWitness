@@ -249,7 +249,8 @@ async def receive_incident(
     background_tasks: BackgroundTasks,
     latitude: str = Form(...),
     longitude: str = Form(...),
-    audio_file: UploadFile = File(...)
+    audio_file: UploadFile = File(...),
+    has_spike: str = Form("false"),
 ):
     """
     Receives incoming payload from the app during an emergency event.
@@ -265,7 +266,9 @@ async def receive_incident(
             buffer.write(await audio_file.read())
 
         # Persist the incident so it survives server restarts.
-        incident_id = db.insert_incident(timestamp, latitude, longitude, file_path)
+        incident_id = db.insert_incident(
+            timestamp, latitude, longitude, file_path, has_spike=has_spike.lower() == "true"
+        )
 
         # Task 4: fire push + SMS alerts to everyone registered/saved.
         send_push_alerts(latitude, longitude)
