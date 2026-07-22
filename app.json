@@ -54,7 +54,8 @@
         {
           "locationWhenInUsePermission": "This app uses your location to share where an emergency occurred."
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

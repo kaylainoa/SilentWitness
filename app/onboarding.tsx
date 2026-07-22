@@ -18,15 +18,24 @@ const STEP_COUNT = 6;
 export default function OnboardingScreen() {
   const [step, setStep] = useState(0);
   const { completeOnboarding } = useOnboarding();
-  const { name, setName, pin, setPin, contacts, updateContact } = useProfile();
+  const { name, setName, setPin: persistPin, contacts, updateContact } = useProfile();
   const primaryContact = contacts[0];
+
+  // The PIN step always starts blank, even though `setPin` persists across
+  // restarts — otherwise a PIN loaded from a previous session would show up
+  // pre-filled here and new digits would append onto it instead of starting over.
+  const [pinDraft, setPinDraft] = useState('');
+  const setPin = (value: string) => {
+    setPinDraft(value);
+    persistPin(value);
+  };
 
   const isFirstStep = step === 0;
   const isLastStep = step === STEP_COUNT - 1;
 
   const canContinue =
     (step !== 1 || name.trim().length > 0) &&
-    (step !== 2 || pin.trim().length >= 4) &&
+    (step !== 2 || pinDraft.trim().length >= 4) &&
     (step !== 3 ||
       (primaryContact.name.trim().length > 0 && primaryContact.phone.trim().length > 0));
 
@@ -51,7 +60,7 @@ export default function OnboardingScreen() {
           {renderStep(step, {
             name,
             setName,
-            pin,
+            pin: pinDraft,
             setPin,
             contactName: primaryContact.name,
             setContactName: (value) => updateContact(primaryContact.id, { name: value }),

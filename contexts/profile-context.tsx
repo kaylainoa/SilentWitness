@@ -1,6 +1,12 @@
+import * as SecureStore from 'expo-secure-store';
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 
 import { API_KEY, CONTACTS_ENDPOINT } from '@/constants/backend';
+
+// Onboarding re-runs every app launch (see app/_layout.tsx), but the PIN
+// itself is persisted here so a restart doesn't invalidate a PIN the user
+// already has memorized and may still enter on the calculator.
+const PIN_STORAGE_KEY = 'silentwitness-pin';
 
 export type EmergencyContact = {
   id: string;
@@ -31,10 +37,25 @@ export const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [name, setName] = useState('');
-  const [pin, setPin] = useState('');
+  const [pin, setPinState] = useState('');
   const [contacts, setContacts] = useState<EmergencyContact[]>([
     { id: createContactId(), name: '', phone: '' },
   ]);
+
+  // Load the last-persisted PIN on launch so it still matches on the
+  // calculator even though onboarding (and its in-memory PIN entry) reruns.
+  useEffect(() => {
+    SecureStore.getItemAsync(PIN_STORAGE_KEY).then((stored) => {
+      if (stored) setPinState(stored);
+    });
+  }, []);
+
+  const setPin = (newPin: string) => {
+    setPinState(newPin);
+    SecureStore.setItemAsync(PIN_STORAGE_KEY, newPin).catch((err) =>
+      console.warn('[SilentWitness] Failed to persist PIN:', err)
+    );
+  };
 
   const addContact = () => {
     setContacts((current) => [...current, { id: createContactId(), name: '', phone: '' }]);
