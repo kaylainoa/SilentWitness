@@ -73,7 +73,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 5. **Run Unit Tests:**
 ```bash
-PYTHONPATH=. python -m pytest app/test_main.py
+FASTAPI_API_KEY=test_key PYTHONPATH=. python -m pytest app/test_main.py
 
 ```
 
