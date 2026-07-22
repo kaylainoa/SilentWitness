@@ -125,11 +125,16 @@ function IncidentCard({ incident }: { incident: Incident }) {
     }
   };
 
+  // Flag the card if there was a volume spike OR the transcript matched a
+  // distress/threat/fear keyword (e.g. "help") from the backend's local
+  // keyword tagger — the neutral tag means no keywords matched.
+  const isFlagged = incident.has_spike || (!!incident.tag && incident.tag !== '🔈 No distress keywords detected');
+
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.cardTitleRow}>
-          {incident.has_spike ? <Text style={styles.spikeMarker}>!</Text> : null}
+          {isFlagged ? <Text style={styles.spikeMarker}>!</Text> : null}
           <Text style={styles.cardTitle}>Incident #{incident.id}</Text>
         </View>
         <Text style={styles.cardDate}>{formatTimestamp(incident.timestamp)}</Text>
