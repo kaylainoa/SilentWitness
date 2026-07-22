@@ -221,7 +221,7 @@ class ContactsPayload(BaseModel):
 async def set_emergency_contacts(payload: ContactsPayload):
     """Replaces the saved contact list with what the app currently has (called
     whenever the profile's emergency contacts change)."""
-    db.replace_contacts([c.dict() for c in payload.contacts])
+   db.replace_contacts([c.model_dump() for c in payload.contacts])
     return {"status": "success", "count": len(payload.contacts)}
 
 @app.get("/api/contacts")
