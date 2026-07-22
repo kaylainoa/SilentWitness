@@ -1,8 +1,12 @@
 import os
 import json
+import ssl
 import time
+import urllib.parse
 import urllib.request
 from typing import Optional
+
+import certifi
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends, Query, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse, FileResponse
@@ -12,6 +16,11 @@ from dotenv import load_dotenv
 import db
 
 load_dotenv()
+
+# This Python install has no trusted CA bundle of its own (a common macOS
+# gotcha), so plain urllib HTTPS requests fail cert verification. Use
+# certifi's bundle explicitly for every outbound HTTPS call below.
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 app = FastAPI()
 
@@ -125,44 +134,64 @@ def send_push_alerts(latitude: str, longitude: str):
                 },
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as resp:
                 print(f"[Push] Sent to {token[:20]}...: {resp.status}")
         except Exception as e:
             print(f"[Push] Failed to send to {token[:20]}...: {e}")
 
 
-# --- Twilio SMS alert config -----------------------------------------------
-# Texts every saved emergency contact when an incident is logged. Requires a
-# Twilio account — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and
-# TWILIO_FROM_NUMBER in app/.env. Until those are set, this safely no-ops.
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER")
+# --- Textbelt SMS alert config ----------------------------------------------
+# Texts every saved emergency contact when an incident is logged. Uses
+# Textbelt (textbelt.com) instead of Twilio — no account/paywall to get
+# started. The default 'textbelt' key is a FREE SHARED key limited to 1
+# SMS/day across every free-tier user globally, so it's fine for a demo but
+# not reliable for real use. Set TEXTBELT_KEY in app/.env to a paid key
+# (textbelt.com/purchase, ~$0.01-0.04/text) for real reliability.
+TEXTBELT_KEY = os.getenv("TEXTBELT_KEY", "textbelt")
+TEXTBELT_ENDPOINT = "https://textbelt.com/text"
 
 
-def send_sms_alerts(latitude: str, longitude: str):
-    """Text every saved emergency contact via Twilio when an incident is logged."""
+def send_sms_alerts(latitude: str, longitude: str, has_spike: bool = False, user_name: str = ""):
+    """Text every saved emergency contact via Textbelt, but only when a volume
+    spike was detected during the recording — a plain PIN-triggered capture
+    with no spike does not send a text."""
+    if not has_spike:
+        print("[SMS] No volume spike detected — skipping SMS alerts.")
+        return
+
     contacts = db.get_contacts()
     if not contacts:
         print("[SMS] No emergency contacts saved — skipping SMS alerts.")
         return
 
-    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER):
-        print("[SMS] Twilio not configured (missing env vars) — skipping SMS alerts.")
-        return
+    # Plain coordinates, not a maps URL — Textbelt blocks links in texts
+    # unless the sending key is manually verified with them.
+    coords = f"{latitude}, {longitude}"
+    who = user_name.strip() or "Someone using SilentWitness"
+    message = (
+        f"SilentWitness alert: {who} has started recording a potentially dangerous "
+        f"situation, and a spike in volume was detected. Please check on them. "
+        f"Coordinates: {coords}"
+    )
 
-    from twilio.rest import Client as TwilioClient
-
-    client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    maps_link = f"https://maps.google.com/?q={latitude},{longitude}"
     for contact in contacts:
         try:
-            message = client.messages.create(
-                body=f"SilentWitness alert: a possible emergency was detected. Location: {maps_link}",
-                from_=TWILIO_FROM_NUMBER,
-                to=contact["phone_number"],
+            data = urllib.parse.urlencode(
+                {"phone": contact["phone_number"], "message": message, "key": TEXTBELT_KEY}
+            ).encode("utf-8")
+            req = urllib.request.Request(
+                TEXTBELT_ENDPOINT,
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
             )
-            print(f"[SMS] Sent to {contact['name']} ({contact['phone_number']}): {message.sid}")
+            with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+
+            if body.get("success"):
+                print(f"[SMS] Sent to {contact['name']} ({contact['phone_number']}): {body.get('textId')}")
+            else:
+                print(f"[SMS] Failed to send to {contact['name']}: {body.get('error')}")
         except Exception as e:
             print(f"[SMS] Failed to send to {contact['name']}: {e}")
 
@@ -251,6 +280,7 @@ async def receive_incident(
     longitude: str = Form(...),
     audio_file: UploadFile = File(...),
     has_spike: str = Form("false"),
+    user_name: str = Form(""),
 ):
     """
     Receives incoming payload from the app during an emergency event.
@@ -266,13 +296,14 @@ async def receive_incident(
             buffer.write(await audio_file.read())
 
         # Persist the incident so it survives server restarts.
+        spike_detected = has_spike.lower() == "true"
         incident_id = db.insert_incident(
-            timestamp, latitude, longitude, file_path, has_spike=has_spike.lower() == "true"
+            timestamp, latitude, longitude, file_path, has_spike=spike_detected
         )
 
         # Task 4: fire push + SMS alerts to everyone registered/saved.
         send_push_alerts(latitude, longitude)
-        send_sms_alerts(latitude, longitude)
+        send_sms_alerts(latitude, longitude, has_spike=spike_detected, user_name=user_name)
 
         # Stretch: transcribe + AI-tag the clip in the background so the
         # response (and the alert above) are returned immediately.

@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { API_KEY, INCIDENT_ENDPOINT } from '@/constants/backend';
+import { useProfile } from '@/contexts/profile-context';
 
 // ---------------------------------------------------------------------------
 // Volume threshold for flagging a spike DURING an active capture (it no
@@ -19,7 +20,7 @@ import { API_KEY, INCIDENT_ENDPOINT } from '@/constants/backend';
 // and more-negative numbers are quieter (e.g. -60 is near silence). A shout or
 // scream typically lands around -10 to -20.
 // ---------------------------------------------------------------------------
-const SPIKE_THRESHOLD_DB = -20;
+const SPIKE_THRESHOLD_DB = -15;
 
 // How often to sample the microphone level, in milliseconds.
 const METERING_INTERVAL_MS = 200;
@@ -37,6 +38,7 @@ const CAPTURE_DURATION_MS = 15_000;
  * the log screen can show a warning marker — it does not start another capture.
  */
 export function useSpikeDetection() {
+  const { name } = useProfile();
   const recorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true, // required — presets do not enable metering
@@ -94,6 +96,7 @@ export function useSpikeDetection() {
     form.append('latitude', String(coords.latitude));
     form.append('longitude', String(coords.longitude));
     form.append('has_spike', hasSpike ? 'true' : 'false');
+    form.append('user_name', name);
     form.append('audio_file', {
       uri: audioUri,
       name: `incident_${audioUri.split('/').pop() ?? 'clip.m4a'}`,
@@ -111,7 +114,7 @@ export function useSpikeDetection() {
     } catch (err) {
       console.warn('[SilentWitness] Upload failed:', err);
     }
-  }, []);
+  }, [name]);
 
   // The PIN + "=" trigger: start a fresh recording, capture 15s (flagging any
   // volume spike along the way), then upload and go idle again.

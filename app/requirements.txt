@@ -3,5 +3,5 @@ uvicorn
 python-multipart
 pydantic
 python-dotenv
-twilio
+certifi
 faster-whisper
