@@ -1,5 +1,3 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useRef } from 'react';
 import {
   AudioModule,
   RecordingPresets,
@@ -8,6 +6,8 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import * as Location from 'expo-location';
+import { router } from 'expo-router';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { API_KEY, INCIDENT_ENDPOINT } from '@/constants/backend';
 

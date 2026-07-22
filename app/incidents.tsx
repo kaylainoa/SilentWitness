@@ -153,7 +153,7 @@ function IncidentCard({ incident }: { incident: Incident }) {
       <View style={styles.cardActions}>
         <Pressable
           onPress={() =>
-            Linking.openURL(`https://maps.google.com/?q=${incident.latitude},${incident.longitude}`)
+            Linking.openURL(`http://maps.apple.com/?q=${incident.latitude},${incident.longitude}`)
           }
           hitSlop={8}>
           <Text style={styles.cardLink}>Open location in Maps</Text>
