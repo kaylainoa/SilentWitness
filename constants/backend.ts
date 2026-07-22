@@ -11,9 +11,14 @@ export const API_KEY = 'FASTAPI_P3';
 // Where the FastAPI backend is running.
 //
 // IMPORTANT: `localhost` refers to the phone itself, not your computer. When
-// testing on a real device (Expo Go), replace this with your computer's LAN IP,
-// e.g. 'http://192.168.1.42:8000'. Run `ipconfig getifaddr en0` on macOS to find it.
-export const BACKEND_URL = 'http://192.168.0.101:8000';
+// testing on a real device (Expo Go), this must be your computer's LAN IP.
+// Run `ipconfig getifaddr en0` on macOS to find it.
+//
+// Set your own IP without editing code: create a `.env` at the project root
+// with e.g. `EXPO_PUBLIC_BACKEND_URL=http://10.25.92.167:8000`. The fallback
+// below is only used if that variable is unset.
+export const BACKEND_URL =
+  process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://192.168.0.101:8000';
 
 // Full endpoint for uploading an incident (audio + GPS).
 export const INCIDENT_ENDPOINT = `${BACKEND_URL}/api/incident`;

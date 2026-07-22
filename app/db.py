@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Optional
 
 DB_PATH = "silentwitness.db"
 
@@ -57,7 +58,7 @@ def get_incidents() -> list[dict]:
         return [dict(row) for row in rows]
 
 
-def get_incident(incident_id: int) -> dict | None:
+def get_incident(incident_id: int) -> Optional[dict]:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
         return dict(row) if row else None

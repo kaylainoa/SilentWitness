@@ -2,6 +2,7 @@ import os
 import json
 import time  # Added this import so your code can use time.time() without crashing!
 import urllib.request
+from typing import Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends, Query
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse, FileResponse
@@ -114,7 +115,7 @@ async def verify_api_key(api_key: str = Depends(api_key_header)):
 # header-only version above.
 async def verify_api_key_flexible(
     header_key: str = Depends(api_key_header),
-    query_key: str | None = Query(default=None, alias="api_key"),
+    query_key: Optional[str] = Query(default=None, alias="api_key"),
 ):
     key = header_key or query_key
     if key != SECRET_API_KEY:
@@ -227,4 +228,8 @@ async def get_incident_audio(incident_id: int):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
 
-    return FileResponse(file_path, media_type="audio/m4a", content_disposition_type="inline")
+    # Use the registered MIME type for .m4a/AAC (audio/mp4). "audio/m4a" is
+    # non-standard and native players (iOS AVPlayer / Android ExoPlayer) sniff
+    # format by MIME/extension — with a non-standard type AND no file extension
+    # in the URL, the clip downloads but the decoder refuses to play it.
+    return FileResponse(file_path, media_type="audio/mp4", content_disposition_type="inline")
