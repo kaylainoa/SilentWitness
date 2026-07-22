@@ -15,6 +15,7 @@ type Incident = {
   audio_file_path: string;
   transcript: string | null;
   tag: string | null;
+  has_spike: number;
 };
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -127,7 +128,10 @@ function IncidentCard({ incident }: { incident: Incident }) {
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>Incident #{incident.id}</Text>
+        <View style={styles.cardTitleRow}>
+          {incident.has_spike ? <Text style={styles.spikeMarker}>!</Text> : null}
+          <Text style={styles.cardTitle}>Incident #{incident.id}</Text>
+        </View>
         <Text style={styles.cardDate}>{formatTimestamp(incident.timestamp)}</Text>
       </View>
       <Text style={styles.cardLocation}>
@@ -222,10 +226,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   cardTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  spikeMarker: {
+    color: '#ff3b30',
+    fontSize: 16,
+    fontWeight: '800',
   },
   cardDate: {
     color: '#a5a5a5',
