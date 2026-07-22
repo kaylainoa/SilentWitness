@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 
 import { OnboardingContext } from '@/contexts/onboarding-context';
 import { ProfileProvider } from '@/contexts/profile-context';
+import { RecordingProvider } from '@/contexts/recording-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export const unstable_settings = {
@@ -19,18 +20,31 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <ProfileProvider>
-        <OnboardingContext.Provider value={{ completeOnboarding: () => setHasOnboarded(true) }}>
-          <Stack>
-            <Stack.Protected guard={!hasOnboarded}>
-              <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-            </Stack.Protected>
-            <Stack.Protected guard={hasOnboarded}>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            </Stack.Protected>
-            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-            <Stack.Screen name="profile" options={{ presentation: 'modal', headerShown: false }} />
-          </Stack>
-        </OnboardingContext.Provider>
+        <RecordingProvider>
+          <OnboardingContext.Provider value={{ completeOnboarding: () => setHasOnboarded(true) }}>
+            <Stack>
+              <Stack.Protected guard={!hasOnboarded}>
+                <Stack.Screen
+                  name="onboarding"
+                  options={{ headerShown: false, gestureEnabled: false }}
+                />
+              </Stack.Protected>
+              <Stack.Protected guard={hasOnboarded}>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              </Stack.Protected>
+              <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+              <Stack.Screen name="profile" options={{ presentation: 'modal', headerShown: false }} />
+              <Stack.Screen
+                name="incidents"
+                options={{ presentation: 'modal', headerShown: false }}
+              />
+              <Stack.Screen
+                name="listening"
+                options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }}
+              />
+            </Stack>
+          </OnboardingContext.Provider>
+        </RecordingProvider>
       </ProfileProvider>
       <StatusBar style="auto" />
     </ThemeProvider>

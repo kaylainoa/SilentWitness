@@ -1,8 +1,10 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useProfile } from '@/contexts/profile-context';
+import { useRecording } from '@/contexts/recording-context';
 import { usePushRegistration } from '@/hooks/use-push-registration';
 import { useSpikeDetection } from '@/hooks/use-spike-detection';
 
@@ -38,10 +40,20 @@ function compute(left: number, right: number, operation: Operation): number {
 export default function CalculatorScreen() {
   // Silent background emergency monitor. Runs behind the calculator disguise;
   // has no visible effect on the UI. (Tasks 1, 2, 3, 5.)
-  useSpikeDetection();
+  const { triggerManualCapture, stopCaptureEarly, pauseMonitoring, resumeMonitoring } =
+    useSpikeDetection();
 
   // Register this device for emergency push alerts (Task 4).
   usePushRegistration();
+
+  const { pin } = useProfile();
+
+  // The listening/incidents screens are sibling routes, not children of this
+  // one, so they reach this hook's controls through here.
+  const { registerHandlers } = useRecording();
+  useEffect(() => {
+    registerHandlers({ triggerManualCapture, stopCaptureEarly, pauseMonitoring, resumeMonitoring });
+  }, [registerHandlers, triggerManualCapture, stopCaptureEarly, pauseMonitoring, resumeMonitoring]);
 
   const [display, setDisplay] = useState('0');
   const [storedValue, setStoredValue] = useState<number | null>(null);
@@ -94,6 +106,13 @@ export default function CalculatorScreen() {
   };
 
   const evaluate = () => {
+    if (pin.length > 0 && display === pin) {
+      clearAll();
+      triggerManualCapture();
+      router.push('/listening');
+      return;
+    }
+
     if (pendingOperation === null || storedValue === null) return;
 
     const result = compute(storedValue, Number(display), pendingOperation);
@@ -200,7 +219,11 @@ export default function CalculatorScreen() {
 
         <View style={styles.row}>
           <CalcButton label="0" wide onPress={() => inputDigit('0')} />
-          <CalcButton label="." onPress={() => inputDigit('.')} />
+          <CalcButton
+            label="."
+            onPress={() => inputDigit('.')}
+            onLongPress={() => router.push('/incidents')}
+          />
           <CalcButton label="=" variant="operator" onPress={evaluate} />
         </View>
       </View>
@@ -211,12 +234,14 @@ export default function CalculatorScreen() {
 function CalcButton({
   label,
   onPress,
+  onLongPress,
   variant = 'digit',
   wide = false,
   active = false,
 }: {
   label: string;
   onPress: () => void;
+  onLongPress?: () => void;
   variant?: 'digit' | 'function' | 'operator';
   wide?: boolean;
   active?: boolean;
@@ -224,6 +249,7 @@ function CalcButton({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       style={({ pressed }) => [
         styles.button,
         wide && styles.buttonWide,

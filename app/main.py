@@ -2,15 +2,20 @@ import os
 import json
 import time
 import urllib.request
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends
+from typing import Optional
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends, Query
 from fastapi.security import APIKeyHeader
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+import db
 
 load_dotenv()
 
 app = FastAPI()
+
+db.init_db()
 
 # --- Expo Push alert config (Task 4) -------------------------------------
 # We use Expo Push Notifications instead of SMS: free, unlimited, and native to
@@ -19,12 +24,10 @@ app = FastAPI()
 # every registered device.
 EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send"
 
-# In-memory list of Expo push tokens registered by devices.
-push_tokens = []
-
 
 def send_push_alerts(latitude: str, longitude: str):
     """Send an Expo push notification to every registered device."""
+    push_tokens = db.get_push_tokens()
     if not push_tokens:
         print("[Push] No push tokens registered — skipping alerts.")
         return
@@ -53,6 +56,43 @@ def send_push_alerts(latitude: str, longitude: str):
         except Exception as e:
             print(f"[Push] Failed to send to {token[:20]}...: {e}")
 
+
+# --- Twilio SMS alert config -----------------------------------------------
+# Texts every saved emergency contact when an incident is logged. Requires a
+# Twilio account — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and
+# TWILIO_FROM_NUMBER in app/.env. Until those are set, this safely no-ops.
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER")
+
+
+def send_sms_alerts(latitude: str, longitude: str):
+    """Text every saved emergency contact via Twilio when an incident is logged."""
+    contacts = db.get_contacts()
+    if not contacts:
+        print("[SMS] No emergency contacts saved — skipping SMS alerts.")
+        return
+
+    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER):
+        print("[SMS] Twilio not configured (missing env vars) — skipping SMS alerts.")
+        return
+
+    from twilio.rest import Client as TwilioClient
+
+    client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    maps_link = f"https://maps.google.com/?q={latitude},{longitude}"
+    for contact in contacts:
+        try:
+            message = client.messages.create(
+                body=f"SilentWitness alert: a possible emergency was detected. Location: {maps_link}",
+                from_=TWILIO_FROM_NUMBER,
+                to=contact["phone_number"],
+            )
+            print(f"[SMS] Sent to {contact['name']} ({contact['phone_number']}): {message.sid}")
+        except Exception as e:
+            print(f"[SMS] Failed to send to {contact['name']}: {e}")
+
+
 # Define the name of the header the frontend must send (e.g., X-API-KEY)
 API_KEY_NAME = "X-API-KEY"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
@@ -64,38 +104,56 @@ SECRET_API_KEY = os.getenv("FASTAPI_API_KEY")
 async def verify_api_key(api_key: str = Depends(api_key_header)):
     if api_key != SECRET_API_KEY:
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Could not validate credentials. Invalid API Key."
         )
     return api_key
+
+# Same check, but also accepts the key as a `?api_key=` query param. Native
+# audio players load a plain string URL and can't be relied on to attach
+# custom headers, so the audio-streaming route needs this instead of the
+# header-only version above.
+async def verify_api_key_flexible(
+    header_key: str = Depends(api_key_header),
+    query_key: Optional[str] = Query(default=None, alias="api_key"),
+):
+    key = header_key or query_key
+    if key != SECRET_API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Could not validate credentials. Invalid API Key."
+        )
+    return key
 
 # Set up server & data structures
 
 UPLOAD_DIR = "saved_recordings"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# In-memory data storage (
-incident_database = []
-emergency_contacts = [] 
 
 # incoming contacts
-class Contact(BaseModel):
+class ContactIn(BaseModel):
     name: str
     phone_number: str
+
+
+class ContactsPayload(BaseModel):
+    contacts: list[ContactIn]
 
 
 # Endpoint to store/retrieve emergency contacts
 
 @app.post("/api/contacts")
-async def add_emergency_contact(contact: Contact):
-    """Saves emergency contacts submitted during onboarding."""
-    emergency_contacts.append(contact.dict())
-    return {"status": "success", "message": f"Contact {contact.name} saved backend side."}
+async def set_emergency_contacts(payload: ContactsPayload):
+    """Replaces the saved contact list with what the app currently has (called
+    whenever the profile's emergency contacts change)."""
+    db.replace_contacts([c.dict() for c in payload.contacts])
+    return {"status": "success", "count": len(payload.contacts)}
 
 @app.get("/api/contacts")
 async def get_emergency_contacts():
     """Retrieves saved contacts so the UI can list or edit them."""
-    return {"contacts": emergency_contacts}
+    return {"contacts": db.get_contacts()}
 
 
 # Endpoint for the app to register its Expo push token (Task 4)
@@ -106,9 +164,8 @@ class PushToken(BaseModel):
 @app.post("/api/push-token")
 async def register_push_token(payload: PushToken):
     """The app calls this on startup to register for emergency push alerts."""
-    if payload.token not in push_tokens:
-        push_tokens.append(payload.token)
-    return {"status": "success", "registered": len(push_tokens)}
+    db.add_push_token(payload.token)
+    return {"status": "success", "registered": len(db.get_push_tokens())}
 
 
 #  Endpoint to receive + store audio/GPS
@@ -127,32 +184,24 @@ async def receive_incident(
         timestamp = int(time.time())
         filename = f"incident_{timestamp}_{audio_file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
-        
+
         # Save the audio file directly onto the server storage
         with open(file_path, "wb") as buffer:
             buffer.write(await audio_file.read())
-            
-        # Build the structured log
-        incident_log = {
-            "id": len(incident_database) + 1,
-            "timestamp": timestamp,
-            "latitude": latitude,
-            "longitude": longitude,
-            "audio_file_path": file_path
-        }
-        
-        # Append to our main log collection
-        incident_database.append(incident_log)
 
-        # Task 4: fire push alerts to all registered devices.
+        # Persist the incident so it survives server restarts.
+        incident_id = db.insert_incident(timestamp, latitude, longitude, file_path)
+
+        # Task 4: fire push + SMS alerts to everyone registered/saved.
         send_push_alerts(latitude, longitude)
+        send_sms_alerts(latitude, longitude)
 
         return {
             "status": "success",
             "message": "Incident audio and GPS coordinates logged successfully on the server.",
-            "incident_id": incident_log["id"]
+            "incident_id": incident_id
         }
-        
+
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
@@ -161,4 +210,26 @@ async def receive_incident(
 @app.get("/api/incidents", dependencies=[Depends(verify_api_key)])
 async def get_all_incidents():
     """Serves the stored history back to Kayla's PIN-gated Incident Log page."""
-    return {"incidents": incident_database}
+    return {"incidents": db.get_incidents()}
+
+
+# Endpoint to stream back a single incident's saved audio clip.
+@app.api_route(
+    "/api/incident/{incident_id}/audio",
+    methods=["GET", "HEAD"],
+    dependencies=[Depends(verify_api_key_flexible)],
+)
+async def get_incident_audio(incident_id: int):
+    incident = db.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    file_path = incident["audio_file_path"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    # Use the registered MIME type for .m4a/AAC (audio/mp4). "audio/m4a" is
+    # non-standard and native players (iOS AVPlayer / Android ExoPlayer) sniff
+    # format by MIME/extension — with a non-standard type AND no file extension
+    # in the URL, the clip downloads but the decoder refuses to play it.
+    return FileResponse(file_path, media_type="audio/mp4", content_disposition_type="inline")
