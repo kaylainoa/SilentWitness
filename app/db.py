@@ -19,10 +19,19 @@ def init_db():
                 timestamp INTEGER NOT NULL,
                 latitude TEXT NOT NULL,
                 longitude TEXT NOT NULL,
-                audio_file_path TEXT NOT NULL
+                audio_file_path TEXT NOT NULL,
+                transcript TEXT,
+                tag TEXT
             )
             """
         )
+        # Add transcript/tag columns to any pre-existing DB (migration for
+        # databases created before these columns existed).
+        for column in ("transcript", "tag"):
+            try:
+                conn.execute(f"ALTER TABLE incidents ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS emergency_contacts (
@@ -50,6 +59,16 @@ def insert_incident(timestamp: int, latitude: str, longitude: str, audio_file_pa
         )
         conn.commit()
         return cursor.lastrowid
+
+
+def set_incident_analysis(incident_id: int, transcript: str, tag: str):
+    """Store the transcript and AI-generated tag after background processing."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE incidents SET transcript = ?, tag = ? WHERE id = ?",
+            (transcript, tag, incident_id),
+        )
+        conn.commit()
 
 
 def get_incidents() -> list[dict]:

@@ -13,6 +13,8 @@ type Incident = {
   latitude: string;
   longitude: string;
   audio_file_path: string;
+  transcript: string | null;
+  tag: string | null;
 };
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -132,6 +134,18 @@ function IncidentCard({ incident }: { incident: Incident }) {
         {Number(incident.latitude).toFixed(5)}, {Number(incident.longitude).toFixed(5)}
       </Text>
 
+      {incident.tag ? (
+        <Text style={styles.cardTag}>{incident.tag}</Text>
+      ) : (
+        <Text style={styles.cardTagPending}>Analyzing audio…</Text>
+      )}
+
+      {incident.transcript ? (
+        <Text style={styles.cardTranscript} numberOfLines={4}>
+          &ldquo;{incident.transcript}&rdquo;
+        </Text>
+      ) : null}
+
       <View style={styles.cardActions}>
         <Pressable
           onPress={() =>
@@ -221,6 +235,25 @@ const styles = StyleSheet.create({
     color: '#a5a5a5',
     fontSize: 14,
     fontFamily: 'monospace',
+  },
+  cardTag: {
+    color: '#ff9f0a',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  cardTagPending: {
+    color: '#666',
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+  cardTranscript: {
+    color: '#d0d0d0',
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 18,
+    marginTop: 4,
   },
   cardActions: {
     flexDirection: 'row',

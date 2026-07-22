@@ -4,3 +4,5 @@ python-multipart
 pydantic
 python-dotenv
 twilio
+faster-whisper
+anthropic

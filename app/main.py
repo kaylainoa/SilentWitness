@@ -3,7 +3,7 @@ import json
 import time
 import urllib.request
 from typing import Optional
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends, Query
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Security, Depends, Query, BackgroundTasks
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
@@ -16,6 +16,77 @@ load_dotenv()
 app = FastAPI()
 
 db.init_db()
+
+# --- Transcription + AI tagging (stretch feature) ------------------------
+# After an incident is saved we transcribe the 15s clip with a local Whisper
+# model (faster-whisper — free, offline, no API key) and ask Claude to produce
+# a short tag + one-line description. Both run in the BACKGROUND so the
+# /api/incident response (and the emergency alert) are never delayed.
+
+# Lazily-loaded Whisper model — the "base" model is a good speed/accuracy
+# balance on CPU for short clips. Loaded once on first use.
+_whisper_model = None
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _whisper_model
+
+
+def transcribe_audio(file_path: str) -> str:
+    """Transcribe an audio file to text using local faster-whisper."""
+    try:
+        model = _get_whisper_model()
+        segments, _info = model.transcribe(file_path)
+        return " ".join(segment.text.strip() for segment in segments).strip()
+    except Exception as e:
+        print(f"[Transcribe] Failed for {file_path}: {e}")
+        return ""
+
+
+def generate_tag(transcript: str) -> str:
+    """Ask Claude for a short category tag + one-line description of the clip.
+
+    Requires ANTHROPIC_API_KEY in the backend .env. Returns "" if unavailable
+    so the incident still works without AI tagging.
+    """
+    if not transcript:
+        return ""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        print("[Tag] ANTHROPIC_API_KEY not set — skipping AI tag.")
+        return ""
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic()
+        prompt = (
+            "This is a transcript of a 15-second audio clip captured by a personal "
+            "safety app when a loud noise or distress was detected. In ONE short line, "
+            "give a category tag followed by a brief description, like "
+            "\"Argument — raised voices, 'get away from me'\" or "
+            "\"Ambient noise — no clear speech\". Transcript:\n\n"
+            f"{transcript}"
+        )
+        response = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return next((b.text for b in response.content if b.type == "text"), "").strip()
+    except Exception as e:
+        print(f"[Tag] Claude request failed: {e}")
+        return ""
+
+
+def process_incident_audio(incident_id: int, file_path: str):
+    """Background job: transcribe the clip, tag it, and save both to the DB."""
+    transcript = transcribe_audio(file_path)
+    tag = generate_tag(transcript)
+    db.set_incident_analysis(incident_id, transcript, tag)
+    print(f"[Analysis] Incident #{incident_id}: tag={tag!r}")
 
 # --- Expo Push alert config (Task 4) -------------------------------------
 # We use Expo Push Notifications instead of SMS: free, unlimited, and native to
@@ -172,6 +243,7 @@ async def register_push_token(payload: PushToken):
 
 @app.post("/api/incident", dependencies=[Depends(verify_api_key)])
 async def receive_incident(
+    background_tasks: BackgroundTasks,
     latitude: str = Form(...),
     longitude: str = Form(...),
     audio_file: UploadFile = File(...)
@@ -195,6 +267,10 @@ async def receive_incident(
         # Task 4: fire push + SMS alerts to everyone registered/saved.
         send_push_alerts(latitude, longitude)
         send_sms_alerts(latitude, longitude)
+
+        # Stretch: transcribe + AI-tag the clip in the background so the
+        # response (and the alert above) are returned immediately.
+        background_tasks.add_task(process_incident_audio, incident_id, file_path)
 
         return {
             "status": "success",
