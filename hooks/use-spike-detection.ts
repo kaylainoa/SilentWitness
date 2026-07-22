@@ -122,9 +122,14 @@ export function useSpikeDetection() {
     );
 
     try {
-      // The recorder is already running (for metering), so it has been capturing
-      // audio around the spike. Let it run CAPTURE_DURATION_MS more, then stop —
-      // unless stopCaptureEarly() resolves this first.
+      // The recorder was already running (for metering), so restart it fresh
+      // here — otherwise the saved clip would include everything recorded
+      // since monitoring began, not just the CAPTURE_DURATION_MS after this
+      // trigger. Stop, then start clean.
+      await recorder.stop();
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+
       await new Promise<void>((resolve) => {
         captureResolveRef.current = resolve;
         captureTimeoutRef.current = setTimeout(resolve, CAPTURE_DURATION_MS);
